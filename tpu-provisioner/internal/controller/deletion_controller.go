@@ -24,6 +24,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
+	lws "sigs.k8s.io/lws/api/lws/v1alpha1"
 )
 
 // DeletionReconciler watches Pods and Nodes and deletes Node Pools.
@@ -52,7 +53,7 @@ type NodeCriteria struct {
 //+kubebuilder:rbac:groups="",resources=nodes/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups="",resources=nodes/finalizers,verbs=update
 //+kubebuilder:rbac:groups="jobset.x-k8s.io",resources=jobsets,verbs=get;list;watch
-
+//+kubebuilder:rbac:groups="lws.x-k8s.io",resources=leaderworkersets,verbs=get;list;watch
 func (r *DeletionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	lg := ctrllog.FromContext(ctx)
 
@@ -98,39 +99,77 @@ func (r *DeletionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, nil
 	}
 
-	// Ensure the JobSet whose pods created this node pool is either gone, completed, or failed before
-	// deleting the node pool.
-	jobSetName, exists := node.Labels[cloud.LabelJobSetName]
-	if !exists {
-		jobSetName, exists = node.Labels[cloud.LabelProvisionerNodepoolID]
-		if !exists {
-			lg.V(3).Info("Node missing jobset name label", "node", node.Name)
-			return ctrl.Result{}, nil
+	// Use variables to determine workload type
+	var parentKind, parentName, parentNamespace string
+
+	lwsName, lwsNameExists := node.Labels[cloud.LabelLWSName]
+	if !lwsNameExists {
+		lwsName, lwsNameExists = node.Labels[cloud.LabelProvisionerNodepoolID]
+		if !lwsNameExists {
+			lg.V(3).Info("Node missing lws name label", "node", node.Name)
 		}
 	}
-	jobSetNamespace, exists := node.Labels[cloud.LabelJobSetNamespace]
-	if !exists {
-		lg.V(3).Info("Node missing jobset namespace label, using default", "node", node.Name)
-		jobSetNamespace = "default"
-	}
-	var js jobset.JobSet
-	if err := r.Get(ctx, types.NamespacedName{Name: jobSetName, Namespace: jobSetNamespace}, &js); err != nil {
-		// Case 1: If JobSet no longer exists, delete the node pool.
-		if apierrors.IsNotFound(err) {
-			return r.deleteNodePool(ctx, &node, fmt.Sprintf("JobSet %s no longer exists", jobSetName))
+	if lwsNameExists {
+		parentKind = "LeaderWorkerSet"
+		parentName = lwsName
+		parentNamespace, lwsNamespaceExists := node.Labels[cloud.LabelLWSNamespace]
+		if !lwsNamespaceExists {
+			lg.V(3).Info("Node missing lws namespace label, using default", "node", node.Name)
+			parentNamespace = "default"
 		}
-		return ctrl.Result{}, err
-	}
-	// Case 2: if JobSet is in completed or failed state, delete node pool.
-	if jobSetCompleted(&js) || jobSetFailed(&js) {
-		return r.deleteNodePool(ctx, &node, fmt.Sprintf("JobSet %s execution has ended (completed or failed)", jobSetName))
 	}
 
+	if !lwsNameExists {
+		jobSetName, exists := node.Labels[cloud.LabelJobSetName]
+		if !exists {
+			jobSetName, exists = node.Labels[cloud.LabelProvisionerNodepoolID]
+			if !exists {
+				lg.V(3).Info("Node missing jobset name label", "node", node.Name)
+				return ctrl.Result{}, nil
+			}
+		}
+		jobSetNamespace, exists := node.Labels[cloud.LabelJobSetNamespace]
+		if !exists {
+			lg.V(3).Info("Node missing jobset namespace label, using default", "node", node.Name)
+			jobSetNamespace = "default"
+		} 
+		parentKind = "JobSet"
+		parentName = jobSetName
+		parentNamespace = jobSetNamespace
+	}
+	
+	if parentKind == "Jobset" {
+		var js jobset.JobSet
+		if err := r.Get(ctx, types.NamespacedName{Name: parentName, Namespace: parentNamespace}, &js); err != nil {
+			// Case 1: If JobSet no longer exists, delete the node pool.
+			if apierrors.IsNotFound(err) {
+				return r.deleteNodePool(ctx, &node, fmt.Sprintf("JobSet %s no longer exists", parentName))
+			}
+			return ctrl.Result{}, err
+		}
+		// Case 2: if JobSet is in completed or failed state, delete node pool.
+		if jobSetCompleted(&js) || jobSetFailed(&js) {
+			return r.deleteNodePool(ctx, &node, fmt.Sprintf("JobSet %s execution has ended (completed or failed)", parentName))
+		}
+	} else if parentKind == "LeaderWorkerSet" {
+		var lwsObj lws.LeaderWorkerSet
+		if err := r.Get(ctx, types.NamespacedName{Name: parentName, Namespace: parentNamespace}, &lwsObj); err != nil {
+			if apierrors.IsNotFound(err) {
+				return r.deleteNodePool(ctx, &node, fmt.Sprintf("LeaderWorkerSet %s no longer exists" parentName))
+			}
+			return ctrl.Result{}, err
+		}
+		// TOOD: LWS doenst have a finished or failed state so just have to wait for it to not exist, which requires manual deletion
+	} else {
+		// Should not happen if parentKind is set correctly above
+		lg.Error(errors.New("unknown parent kind"), "Logic error: parentKind not set", "node", node.Name)
+		return ctrl.Result{}, nil
+	}
 	// No need to check all the other nodes, which will have the same jobset name label, we can end
 	// the loop early.
 	// Log the fact we are not deleting at a high verbosity level to avoid polluting logs but
 	// allow for improved debugability.
-	lg.V(5).Info("Node pool for JobSet is still in use, not deleting", "nodePoolName", nodePoolName, "jobSetName", jobSetName)
+	lg.V(5).Info("Node pool for workload is still in use, not deleting", "nodePoolName", nodePoolName, "workloadName", parentName)
 	return ctrl.Result{}, nil
 }
 
@@ -206,3 +245,12 @@ func jobSetFailed(js *jobset.JobSet) bool {
 	}
 	return false
 }
+
+// func lwsCompleted(lws *lws.LeaderWorkerSet) bool {
+
+// }
+
+// func lwsIsFailed(lws *lws.LeaderWorkerSet) bool {
+// 	for _, condition := range lws.Status.Conditions {
+// 		if condition.Type == 
+// }
