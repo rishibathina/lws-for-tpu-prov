@@ -54,6 +54,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
+	lws "sigs.k8s.io/lws/api/lws/v1alpha1"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -65,6 +66,7 @@ var (
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(jobset.AddToScheme(scheme))
+	utilruntime.Must(lws.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
 }
 

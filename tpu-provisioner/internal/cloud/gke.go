@@ -77,6 +77,7 @@ type GKE struct {
 	inProgressDeletesNPName sync.Map
 	inProgressCreatesNPName sync.Map
 	inProgressCreatesJobKey sync.Map
+	inProgressCreatesLWSKey sync.Map
 }
 
 func (g *GKE) NodePoolLabelKey() string { return GKENodePoolNameLabel }

@@ -4,6 +4,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
+	lws "sigs.k8s.io/lws/api/lws/v1alpha1"
 )
 
 func isPending(p *corev1.Pod) bool {
@@ -53,6 +54,20 @@ func partOfJobSet(pod *corev1.Pod) bool {
 	// Annotation is from here:
 	// https://github.com/kubernetes-sigs/jobset/blob/6343f09b8a1851090586d0efca16c6ab68982318/api/jobset/v1alpha2/jobset_types.go#L23
 	return pod.Annotations[jobset.JobSetNameKey] != ""
+}
+
+func partOfLWS(pod *corev1.Pod) bool {
+	// Label is form here:
+	// https://github.com/kubernetes-sigs/lws/blob/main/api/leaderworkerset/v1/leaderworkerset_types.go#L36
+	return pod.Labels[lws.SetNameLabelKey] != ""
+}
+
+func isLeaderPodLWS(pod *corev1.Pod) bool {
+	// Only workers have the leader pod annotation
+	// the other way to check is:
+	// return pod.Labels[lws.WorkerIndexLabelKey] == "0"
+
+	return pod.Annotations[lws.LeaderPodNameAnnotationKey] == ""
 }
 
 // isLeaderPod returns true if the given pod is a leader pod (job completion index of 0),

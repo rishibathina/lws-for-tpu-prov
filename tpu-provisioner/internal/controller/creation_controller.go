@@ -104,8 +104,7 @@ func (r *CreationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			// Only reconcile pods which meet the conditions defined below.
 			pod, ok := object.(*corev1.Pod)
 			return ok &&
-				partOfJobSet(pod) &&
-				isLeaderPod(pod) &&
+				(partOfJobSet(pod) && isLeaderPod(pod) || partOfLWS(pod) && isLeaderPodLWS(pod))
 				isPending(pod) &&
 				isUnschedulable(pod) &&
 				doesRequestResource(pod, r.PodCriteria.ResourceType) &&

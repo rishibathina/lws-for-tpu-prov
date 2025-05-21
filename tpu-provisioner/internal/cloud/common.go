@@ -22,6 +22,9 @@ const (
 	LabelJobSetName      = keyPrefix + "tpu-provisioner-jobset-name"
 	LabelJobSetNamespace = keyPrefix + "tpu-provisioner-jobset-namespace"
 
+	LabelLWSName      = keyPrefix + "tpu-provisioner-lws-name"
+	LabelLWSNamespace = keyPrefix + "tpu-provisioner-lws-namespace"
+
 	LabelNodePoolHash = keyPrefix + "tpu-provisioner-nodepool-hash"
 
 	LabelProvisionerNodepoolID = "provisioner-nodepool-id"
