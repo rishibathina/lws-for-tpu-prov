@@ -24,6 +24,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
+	lws "sigs.k8s.io/lws/api/lws/v1alpha1"
 )
 
 var log = logf.Log.WithName("provider")
@@ -312,26 +313,53 @@ func (g *GKE) nodePoolForPod(p *corev1.Pod) (*containerv1beta1.NodePool, error) 
 		return nil, errors.New("no owner reference")
 	}
 
-	jobSetName := p.Labels[jobset.JobSetNameKey]
-	if jobSetName == "" {
-		// This should never be reached due to the event filters in reconciler, but added just in case.
-		return nil, fmt.Errorf("pod %s is not part of a jobset, not constructing node pool config for it", p.Name)
+	var workloadType string
+	workloadName := p.Labels[jobset.JobSetNameKey]
+	if workloadName == "" {
+		workloadName = p.Labels[lws.SetNameLabelKey]
+		if workloadName == "" {
+			// This should never be reached due to the event filters in reconciler, but added just in case.
+			return nil, fmt.Errorf("pod %s is not part of a jobset or LWS, not constructing node pool config for it", p.Name)
+		} else {
+			workloadType = "LeaderWorkSet"
+		}
+		
+	} else {
+		workloadType = "Jobset"
 	}
 
-	labels := map[string]string{
-		// Used to keep track of what Node Pools this provisioner is responsible for.
-		LabelNodepoolManager: LabelNodepoolManagerTPUPodinator,
+	if workloadType == "Jobset" {
+		labels := map[string]string{
+			// Used to keep track of what Node Pools this provisioner is responsible for.
+			LabelNodepoolManager: LabelNodepoolManagerTPUPodinator,
 
-		// Leave some bread crumbs:
-		LabelParentKind: strings.ToLower(ref.Kind),
-		LabelParentName: strings.ToLower(ref.Name),
-		// Assuming a Namespaced parent here...
-		LabelParentNamespace: strings.ToLower(p.Namespace),
+			// Leave some bread crumbs:
+			LabelParentKind: strings.ToLower(ref.Kind),
+			LabelParentName: strings.ToLower(ref.Name),
+			// Assuming a Namespaced parent here...
+			LabelParentNamespace: strings.ToLower(p.Namespace),
 
-		LabelJobSetName:      jobSetName,
-		LabelJobSetNamespace: p.Namespace,
+			LabelJobSetName:      workloadName,
+			LabelJobSetNamespace: p.Namespace,
+		}
+	} else if workloadType == "LeaderWorkSet" {
+		labels := map[string]string{
+			// Used to keep track of what Node Pools this provisioner is responsible for.
+			LabelNodepoolManager: LabelNodepoolManagerTPUPodinator,
+
+			// Leave some bread crumbs:
+			LabelParentKind: strings.ToLower(ref.Kind),
+			LabelParentName: strings.ToLower(ref.Name),
+			// Assuming a Namespaced parent here...
+			LabelParentNamespace: strings.ToLower(p.Namespace),
+
+			LabelLWSName:      workloadName,
+			LabelLWSNamespace: p.Namespace,
+		}
+	} else {
+		return nil, fmt.Errorf("unknown workload type: %v", workloadType)
 	}
-
+	
 	// Copy configured labels from the Pod to the Node.
 	for _, key := range g.ClusterContext.PodToNodeLabels {
 		if val, ok := p.Labels[key]; ok {
