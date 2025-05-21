@@ -63,6 +63,7 @@ type NodePoolRef struct {
 
 	CreationTime time.Time
 
+	// CreatedForWorkload types.NamespacedName
 	CreatedForJobSet types.NamespacedName
 
 	Error   bool
