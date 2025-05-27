@@ -4,7 +4,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
-	lws "sigs.k8s.io/lws/api/lws/v1alpha1"
+	lws "sigs.k8s.io/lws/api/leaderworkerset/v1"
 )
 
 func isPending(p *corev1.Pod) bool {

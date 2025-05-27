@@ -106,7 +106,7 @@ func (r *CreationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			pod, ok := object.(*corev1.Pod)
 			return ok &&
 				(partOfJobSet(pod) && isLeaderPod(pod) || partOfLWS(pod) && isLeaderPodLWS(pod))
-				isPending(pod) &&
+			isPending(pod) &&
 				isUnschedulable(pod) &&
 				doesRequestResource(pod, r.PodCriteria.ResourceType) &&
 				hasNodeSelectors(pod, cloud.GKETPUNodeSelector) &&

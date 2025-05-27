@@ -24,6 +24,7 @@ const (
 
 	LabelLWSName      = keyPrefix + "tpu-provisioner-lws-name"
 	LabelLWSNamespace = keyPrefix + "tpu-provisioner-lws-namespace"
+	LabelLWSGroup     = keyPrefix + "tpu-provisioner-lws-group"
 
 	LabelNodePoolHash = keyPrefix + "tpu-provisioner-nodepool-hash"
 
@@ -63,6 +64,7 @@ type NodePoolRef struct {
 
 	CreationTime time.Time
 
+	// TODO: Fix this
 	// CreatedForWorkload types.NamespacedName
 	CreatedForJobSet types.NamespacedName
 

@@ -11,9 +11,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
-	lws "sigs.k8s.io/lws/api/lws/v1alpha1"
+	lws "sigs.k8s.io/lws/api/leaderworkerset/v1"
 )
-
 
 // TODO: FOR ALL INSTANCES OF CREATEDFORJOBSET CHANGE TO CREATEDFORWORKLOAD
 

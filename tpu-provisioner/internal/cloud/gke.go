@@ -24,7 +24,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
-	lws "sigs.k8s.io/lws/api/lws/v1alpha1"
+	lws "sigs.k8s.io/lws/api/leaderworkerset/v1"
 )
 
 var log = logf.Log.WithName("provider")
@@ -144,6 +144,7 @@ func (g *GKE) EnsureNodePoolForPod(p *corev1.Pod, why string) error {
 		defer g.inProgressCreatesJobKey.Delete(jobKey)
 	}
 
+	// TODO: add lws version of this
 	// Get JobSet this pod is part of from the pod labels and log it.
 	jobSetName := p.Labels[jobset.JobSetNameKey]
 	g.Recorder.Eventf(p, corev1.EventTypeNormal, EventNodePoolCreationStarted, "Starting creation of Node Pool %s (size = %v) for JobSet %s because %s", np.Name, np.InitialNodeCount, jobSetName, why)
@@ -174,6 +175,7 @@ func (g *GKE) ListNodePools() ([]NodePoolRef, error) {
 		return nil, fmt.Errorf("listing node pools: %w", err)
 	}
 
+	// TODO: add LWS version of this
 	for _, np := range resp.NodePools {
 		jsName, exists := np.Config.Labels[LabelJobSetName]
 		if !exists {
@@ -323,7 +325,7 @@ func (g *GKE) nodePoolForPod(p *corev1.Pod) (*containerv1beta1.NodePool, error) 
 		} else {
 			workloadType = "LeaderWorkSet"
 		}
-		
+
 	} else {
 		workloadType = "Jobset"
 	}
@@ -355,11 +357,12 @@ func (g *GKE) nodePoolForPod(p *corev1.Pod) (*containerv1beta1.NodePool, error) 
 
 			LabelLWSName:      workloadName,
 			LabelLWSNamespace: p.Namespace,
+			LabelLWSGroup:     p.Labels[lws.LabelLWSGroupKey],
 		}
 	} else {
 		return nil, fmt.Errorf("unknown workload type: %v", workloadType)
 	}
-	
+
 	// Copy configured labels from the Pod to the Node.
 	for _, key := range g.ClusterContext.PodToNodeLabels {
 		if val, ok := p.Labels[key]; ok {
@@ -581,6 +584,7 @@ func sumTPURequests(p *corev1.Pod) (int, error) {
 // Node pool name format is: {first 34 chars of jobset name}-{first 5 chars of job-key}
 // This ensures node pool names are within the 40 char limit on node pool name size.
 func podToNodePoolName(p *corev1.Pod) (string, error) {
+	// TODO: Add LWS support
 	jobSetName, exists := p.Labels[jobset.JobSetNameKey]
 	if !exists {
 		return "", fmt.Errorf("%s label not found on pod %s", jobset.JobSetNameKey, p.Name)

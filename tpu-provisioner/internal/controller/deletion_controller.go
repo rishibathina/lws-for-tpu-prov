@@ -24,7 +24,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	jobset "sigs.k8s.io/jobset/api/jobset/v1alpha2"
-	lws "sigs.k8s.io/lws/api/lws/v1alpha1"
+	lws "sigs.k8s.io/lws/api/leaderworkerset/v1"
 )
 
 // DeletionReconciler watches Pods and Nodes and deletes Node Pools.
@@ -49,11 +49,11 @@ type NodeCriteria struct {
 	PoolDeletionDelay time.Duration
 }
 
-//+kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups="",resources=nodes/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups="",resources=nodes/finalizers,verbs=update
-//+kubebuilder:rbac:groups="jobset.x-k8s.io",resources=jobsets,verbs=get;list;watch
-//+kubebuilder:rbac:groups="lws.x-k8s.io",resources=leaderworkersets,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=nodes/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups="",resources=nodes/finalizers,verbs=update
+// +kubebuilder:rbac:groups="jobset.x-k8s.io",resources=jobsets,verbs=get;list;watch
+// +kubebuilder:rbac:groups="lws.x-k8s.io",resources=leaderworkersets,verbs=get;list;watch
 func (r *DeletionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	lg := ctrllog.FromContext(ctx)
 
@@ -132,12 +132,12 @@ func (r *DeletionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		if !exists {
 			lg.V(3).Info("Node missing jobset namespace label, using default", "node", node.Name)
 			jobSetNamespace = "default"
-		} 
+		}
 		parentKind = "JobSet"
 		parentName = jobSetName
 		parentNamespace = jobSetNamespace
 	}
-	
+
 	if parentKind == "Jobset" {
 		var js jobset.JobSet
 		if err := r.Get(ctx, types.NamespacedName{Name: parentName, Namespace: parentNamespace}, &js); err != nil {
@@ -152,14 +152,49 @@ func (r *DeletionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			return r.deleteNodePool(ctx, &node, fmt.Sprintf("JobSet %s execution has ended (completed or failed)", parentName))
 		}
 	} else if parentKind == "LeaderWorkerSet" {
+		// Case 1: LWS does not exist
 		var lwsObj lws.LeaderWorkerSet
 		if err := r.Get(ctx, types.NamespacedName{Name: parentName, Namespace: parentNamespace}, &lwsObj); err != nil {
 			if apierrors.IsNotFound(err) {
-				return r.deleteNodePool(ctx, &node, fmt.Sprintf("LeaderWorkerSet %s no longer exists" parentName))
+				return r.deleteNodePool(ctx, &node, fmt.Sprintf("LeaderWorkerSet %s no longer exists", parentName))
 			}
 			return ctrl.Result{}, err
 		}
-		// TOOD: LWS doenst have a finished or failed state so just have to wait for it to not exist, which requires manual deletion
+
+		// Case 2: checks if a pod with the unique group hash exists
+		lwsGroupFromNode, lwsGroupExistsOnNode := node.Labels[cloud.LabelLWSGroup]
+		if !lwsGroupExistsOnNode {
+			lg.Error(errors.New("missing LWS group label on node"), "Node is marked for LWS but missing its group label. Cannot safely determine LWS leader pods for deletion check.", "node", node.Name, "expectedLabel", cloud.LabelLWSGroup)
+			return ctrl.Result{Requeue: true}, fmt.Errorf("node %s identified for LWS is missing the group label %s", node.Name, cloud.LabelLWSGroup)
+		}
+
+		var leaderPodList corev1.PodList
+		matchingLabels := client.MatchingLabels{
+			lws.SetNameLabelKey:         parentName,
+			lws.GroupUniqueHashLabelKey: lwsGroupFromNode,
+			lws.WorkerIndexLabelKey:     "0",
+		}
+
+		if err := r.List(ctx, &leaderPodList, client.InNamespace(parentNamespace), matchingLabels); err != nil {
+			lg.Error(err, "Failed to list leader pods for LeaderWorkerSet", "lwsName", parentName, "lwsGroup", lwsGroupFromNode, "namespace", parentNamespace)
+			return ctrl.Result{}, fmt.Errorf("listing leader pods for LWS %s/%s (group: %s): %w", parentNamespace, parentName, lwsGroupFromNode, err)
+		}
+
+		activeLeaderFound := false
+		for _, pod := range leaderPodList.Items {
+			if pod.Status.Phase != corev1.PodSucceeded &&
+				pod.Status.Phase != corev1.PodFailed &&
+				pod.DeletionTimestamp == nil {
+				activeLeaderFound = true
+				lg.V(3).Info("Active leader pod found for LeaderWorkerSet, node pool will not be deleted.",
+					"lwsName", parentName, "lwsGroup", lwsGroupFromNode, "pod", client.ObjectKeyFromObject(&pod).String(), "podPhase", pod.Status.Phase)
+				break
+			}
+		}
+
+		if !activeLeaderFound {
+			return r.deleteNodePool(ctx, &node, fmt.Sprintf("No active leader pods found for LeaderWorkerSet %s/%s (group: %s)", parentNamespace, parentName, lwsGroupFromNode))
+		}
 	} else {
 		// Should not happen if parentKind is set correctly above
 		lg.Error(errors.New("unknown parent kind"), "Logic error: parentKind not set", "node", node.Name)
@@ -245,12 +280,3 @@ func jobSetFailed(js *jobset.JobSet) bool {
 	}
 	return false
 }
-
-// func lwsCompleted(lws *lws.LeaderWorkerSet) bool {
-
-// }
-
-// func lwsIsFailed(lws *lws.LeaderWorkerSet) bool {
-// 	for _, condition := range lws.Status.Conditions {
-// 		if condition.Type == 
-// }
